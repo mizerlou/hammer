@@ -1,0 +1,145 @@
+hammer
+------
+hammer is a spam filter that makes extensive use of bayesian analysis of
+user definable tokens.
+
+copyright lantz moore 2004-2014
+see LICENSE file for license information.
+
+python version
+--------------
+
+hammer requires python2.2 or later, if your systems' /usr/bin/python is
+earlier than 2.1, then you'll need to run all the commands below using
+python2.2 or python2.3 or whatever.
+
+
+
+training hammer
+---------------
+
+you have to train hammer on some old e-mail.  hammer seems to do pretty
+good with 1000 ham and 1000 spam messages for the training set.  it'll
+probaby do ok with less, dunno.
+
+you use the hammer-learn tool to learn.  currently, hammer only works on
+"maildir/nnml" like directories, ie, each message is stored in a separate
+file.
+
+the initial training is basically a two step process: first tell hammer
+what your spam looks like, then tell it what your ham looks like.
+
+the following example assumes your ham/spam corpus lives in ~/Mail/ham and
+~/Mail/spam.
+
+tell hammer what the spam looks like
+$ hammer-learn -s ~/Mail/spam
+
+tell hammer what the ham looks like
+$ hammer-learn -n ~/Mail/ham
+
+you're done with the initial training.
+
+
+
+
+hooking hammer into procmail
+----------------------------
+
+the following will add an X-Hammer-Status header to all incoming messages:
+
+:0fw
+| hammer
+
+the X-Hammer-Status message can have two values: Yes and No
+
+Yes == spam
+No == ham
+
+(should this have been simply "ham" and "spam"?)
+
+so you can filter all your spam into a folder like so:
+
+:0:
+* ^X-Hammer-Status: Yes
+spam.spool
+
+(or whatever)
+
+
+
+
+what to do when hammer mis-identifies a message
+-----------------------------------------------
+
+this sort of depends on your mail client.  at a minimum, you can run
+hammer-learn on the file containing the message like so:
+
+when the message was really spam, but hammer thought it was ham:
+hammer-learn -N -s file
+
+when the message was really ham, but hammer thought it was spam:
+hammer-learn -S -n file
+
+if you want to forget about a message (for whatever reason) that was spam,
+do:
+hammer-learn -S file
+
+if it was ham:
+hammer-learn -N file
+
+(shouldn't this really just be -F or something?  we track what the message
+was filed as, can't we just use that?)
+
+i use gnus and here is the setup that i use (based on code snatched from
+the ding list):
+
+(defun exec-on-all-processable (shell-command lisp-command)
+  "Execute a command on all marked-processable messages, or the one under the cursor"
+  (labels ((do-exec (n g shell-command lisp-command)
+                    (with-temp-buffer
+                      (gnus-request-article-this-buffer n g)
+                      (funcall lisp-command)
+                      (gnus-request-replace-article n g (current-buffer))
+                      (shell-command-on-region (point-min) (point-max)
+                                               shell-command))))
+    (let ((g gnus-newsgroup-name))
+      (let ((list gnus-newsgroup-processable))
+        (if (>= (length list) 1)
+            (while list
+              (let ((n (car list)))
+                (do-exec n g shell-command lisp-command))
+              (setq list (cdr list)))
+          (let ((n (gnus-summary-article-number)))
+            (do-exec n g shell-command lisp-command)))))))
+
+(defun hammer-remove-status ()
+  "Remove the 'X-Bogosity' header"
+  (save-restriction
+    (message-narrow-to-head)
+    (message-remove-header "X-Hammer-Status" nil)))
+
+(defun hammer-insert-status (status)
+  (hammer-remove-status)
+  (beginning-of-buffer)
+  (re-search-forward "^$")
+  (insert "X-Hammer-Status: " status " (forced)\n"))
+
+(defun hammer-insert-status-yes()
+  (hammer-insert-status "Yes"))
+
+(defun hammer-insert-status-no()
+  (hammer-insert-status "No"))
+
+(defun hammer-this-is-spam ()
+  "Mark all process-marked messages as spam with hammer and respool them"
+  (interactive)
+  (exec-on-all-processable "hammer-learn -N -s" 'hammer-insert-status-yes)
+  (gnus-summary-respool-article nil (gnus-group-method gnus-newsgroup-name)))
+
+(defun hammer-this-is-not-spam ()
+  "Mark all process-marked messages as NOT spam with hammer and respool them"
+  (interactive)
+  (exec-on-all-processable "hammer-learn -S -n" 'hammer-insert-status-no)
+  (gnus-summary-respool-article nil (gnus-group-method gnus-newsgroup-name)))
+

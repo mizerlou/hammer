@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+
+from hammer import bayes, tokens, util, config, datastore
+import email.Parser, sys, re, os.path
+
+def yes_or_no(bool):
+    if bool: return "Yes"
+    else:    return "No"
+
+show_all = False
+
+opt = util.Options()
+opt.getopt(sys.argv[1:], "c:dnswlvt")
+config = config.Config(opt["c"])
+
+lock = util.LockFile(config.lock)
+lock.lock()
+
+data = datastore.create(config)
+bayes = bayes.Bayes(data)
+parser = email.Parser.Parser()
+
+if opt["l"]:
+    data.dump()
+if opt["w"]:
+    if opt["v"]:
+        print bayes.get_token_counts(opt.args)
+    for (p, token) in bayes.get_token_probabilities(opt.args):
+        print token,p
+    print "level:", bayes.filter(opt.args)[0]
+else:
+    if opt["n"] and opt["s"]:
+        print "you must pic -s or -n"
+        sys.exit(1)
+    elif opt["n"]: to_show = True
+    elif opt["s"]: to_show = False
+    else:
+        show_all = True
+
+    pattern = re.compile("[0-9]+")
+    files = filter(lambda x: pattern.search(os.path.basename(x)),
+                   filter(os.path.isfile, sys.argv[1:]))
+    for dir in filter(os.path.isdir, sys.argv[1:]):
+        files += util.find(dir, pattern)
+
+    count = 0
+    total = 0
+    for f in files:
+        o = open(f)
+        try:
+            msg = parser.parse(o)
+            toks = tokens.tokenize(msg, config)
+            (level, probs) = bayes.filter(toks)
+            if show_all or config.is_spam(level) ^ to_show:
+                if opt["v"]:
+                    for (token, gc, gcp, bc, bcp) in bayes.get_token_counts(toks):
+                        print token, gc, bc
+                if opt["d"]:
+                    print "\n\t".join(["%s:%0.4f" % (v, p)
+                                       for (p, v) in probs])
+                print "%3s %f %s" % (yes_or_no(config.is_spam(level)),
+                                     level, f)
+                count += 1
+            total += 1
+        except email.Errors.BoundaryError, e:
+            print >> sys.stderr, "%s: %s" % (f, e)
+        o.close()
+            
+    print "%d/%d" % (count, total)
+
+data.close()
+lock.unlock()

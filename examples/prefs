@@ -1,0 +1,82 @@
+dbname=lmoore
+dbuser=lmoore
+dbpasswd=secret
+
+# load the functions stored in "user_code.py", this is relative to the
+# configuration directory.
+load user_code.py
+
+# set the "how high is too high" spam level, any score above this is
+# considered spam.  scores run from 0.0 to 1.0
+level = 0.9
+
+# we reference these two regexs quite a bit, so we bind them to names to
+# make them a bit easier to use
+regex word /\b\w(?:[\w']{1,18})\w\b/
+regex email_address /[-\.+\w]+?@[-\w]+(?:\.[-\w]+)+/
+
+# look for e-mail addresses in the from, to, and cc headers, put them all
+# in the "EMAIL" group
+header EMAIL_FROM from email_address
+header EMAIL_TO to email_address
+header EMAIL_CC cc email_address
+group EMAIL EMAIL_FROM EMAIL_TO EMAIL_CC
+
+# look for ip addresses in received headers
+header IP_RCVD received /\d{1,3}(?:\.\d{1,3}){3}/
+
+# break the x-mailer header up into words
+header X_MAILER x-mailer word
+
+header USER_AGENT user-agent word
+
+header SUBJECT subject word
+
+# call tokenize_SA on the value of the x-spam-status header
+header SA x-spam-status eval:tokenize_SA
+
+
+# look for some phrases in the body and just save the name
+body THIS_IS_NOT_SPAM /this is not spam/i
+meta-token THIS_IS_NOT_SPAM
+
+body YOU_HAVE_RCVD /you have received this message/i
+meta-token YOU_HAVE_RCVD
+
+# look for some phrases in the body that talk about getting off a list
+# put them all in the "REMOVE" group and just save the group name
+body FORGET /f.rget this add?ress?/i
+meta-token FORGET
+
+body TO_BE_REMOVED /to be removed/i
+meta-token TO_BE_REMOVED
+
+body OFF_LIST /off_list/i
+meta-token OFF_LIST
+
+body RMVE /\brmve\b/i
+meta-token RMVE
+
+body UPDATE_PREF /update (?:list|your e-?mail) preferences?/i
+meta-token UPDATE_PREF
+
+group REMOVE FORGET TO_BE_REMOVED OFF_LIST RMVE UPDATE_PREF
+
+# look for a spam phrase
+body IYS /increase your sales/i
+meta-token IYS
+
+# look for things that look like urls/ip addresses/hostnames in the body
+body URL /(?:\d{1,3}(?:\.\d{1,3}){3}|(?:[-\w]+\.){2,}(?:com(?:\.\w\w)?|biz|org|edu|mil|info))/i
+
+# look for urls that have username/password embedded in them, just
+# remember the rule name
+body URL_ID /http://\w+(?::\w+)?@(?:\d{1,3}(?:\.\d{1,3}){3}|(?:[-\w]+\.){2,}(?:com(?:\.\w\w)?|biz|org|edu|mil|info))/i
+meta-token URL_ID
+
+# look for email addresses in the body
+body MAILTO email_address
+
+# look for "well formed" signatures and save the rule name
+body WELL_FORMED_SIGNATURE /\n-- \n(?:.{0,80}\n){1,4}\Z/m
+meta-token WELL_FORMED_SIGNATURE

@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+
+from hammer import bayes, tokens, util, tracker, config, datastore
+import sys, email.Parser, os, re
+
+def yes_or_no(bool):
+    if bool: return "Yes"
+    else:    return "No"
+
+opt = util.Options()
+
+opt.getopt(sys.argv[1:], "c:")
+
+config = config.Config(opt["c"])
+
+lock = util.LockFile(config.lock)
+lock.lock()
+
+data = datastore.create(config)
+
+parser = email.Parser.Parser()
+
+msg = parser.parse(sys.stdin)
+
+if not data.is_known(msg):
+    bayes = bayes.Bayes(data)
+    toks = tokens.tokenize(msg, config)
+    (level, probs) = bayes.filter(toks)
+    is_spam = config.is_spam(level)
+    msg["X-Hammer-Status"] = "%s, level=%f" % (yes_or_no(is_spam), level)
+    msg["X-Hammer-Report"] = ";".join(["%s:%0.2f" % (v, p)
+                                       for (p, v) in probs])
+    sys.stdout.write(str(msg))
+    
+    if is_spam:
+        data.update(toks, (0,1))
+        data.spam(msg)
+    else:
+        data.update(toks, (1,0))
+        data.ham(msg)
+                
+data.close()
+
+lock.unlock()

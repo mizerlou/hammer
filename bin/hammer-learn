@@ -1,0 +1,109 @@
+#!/usr/bin/env python
+
+from hammer import bayes, tokens, util, config, datastore
+import sys, email.Parser, os, re, traceback
+
+opt = util.Options()
+opt["pattern"] = "[0-9]+";
+
+opt.getopt(sys.argv[1:], "fsnc:", ["pattern"])
+
+if not (opt["f"] or opt["s"] or opt["n"]):
+    print >> sys.stderr, "must specify f s or n"
+    sys.exit(0)
+
+config = config.Config(opt["c"])
+
+lock = util.LockFile(config.lock)
+lock.lock()
+
+data = datastore.create(config)
+bayes = bayes.Bayes(data)
+
+parser = email.Parser.Parser()
+pattern = re.compile(opt["pattern"])
+
+files = filter(lambda x: pattern.search(os.path.basename(x)),
+               filter(os.path.isfile, opt.args))
+for dir in filter(os.path.isdir, opt.args):
+    files += util.find(dir, pattern)
+
+count = 0
+new_messages = 0
+token_count = 0
+
+def learn(stream):
+    global new_messages, token_count
+    
+    msg = parser.parse(stream)
+    toks = tokens.tokenize(msg, config)
+
+    if opt["f"]:
+        if not data.is_known(msg):
+            # nothing to forget
+            return
+        elif data.is_spam(msg):
+            update = (0, -1)
+        else:
+            update = (-1, 0)
+    elif opt["s"]:
+        if data.is_spam(msg):
+            # nothing to do
+            return
+        elif data.is_known(msg):
+            update = (-1, 1)
+        else:
+            update = (0, 1)
+        data.spam(msg)
+    else:
+        if data.is_ham(msg):
+            # nothing to do
+            return
+        elif data.is_known(msg):
+            update = (1, -1)
+        else:
+            update = (1, 0)
+        data.ham(msg)
+
+    data.update(toks, update)
+
+    new_messages += 1
+    token_count += len(toks)
+
+try:
+    if files:
+        file_count = float(len(files))
+
+        for f in files:
+            try:
+                o = open(f)
+            except IOError, e:
+                print "WARNING:", e
+                continue
+            try:
+                try:
+                    learn(o)
+                except Exception,e:
+                    print >> sys.stderr, "%s: %s" % (f, e)
+                    traceback.print_exc(file=sys.stderr)
+                    continue
+            finally:
+                o.close()
+
+            count += 1
+            if count % 10 == 0:
+                sys.stdout.write("%5d%% %5d messages, %10d tokens\r" %
+                                 (int(count / file_count * 100),
+                                  new_messages, token_count))
+                sys.stdout.flush()
+    else:
+        count = 1
+        learn(sys.stdin)
+finally:
+    data.close()
+
+print
+print "%d new messages, %d tokens" % (new_messages, token_count)
+print "%d messages already seen" % (count - new_messages)
+
+lock.unlock()

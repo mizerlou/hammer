@@ -1,0 +1,7 @@
+*.pyc
+tokens-good
+tokens-bad
+msgid
+lock
+messages
+tokens
